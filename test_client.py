@@ -1,4 +1,4 @@
-"""Проверка сервера без Claude: запускаем server.py как подпроцесс и вызываем инструменты."""
+"""Smoke test without Claude: start server.py as a subprocess and call its tools over stdio."""
 
 import asyncio
 import os
@@ -12,7 +12,7 @@ SERVER = Path(__file__).parent / "server.py"
 
 
 async def main() -> None:
-    db_path = Path(tempfile.mkdtemp()) / "test.db"  # отдельная база, чтобы не трогать рабочую
+    db_path = Path(tempfile.mkdtemp()) / "test.db"  # separate database, the real one is untouched
     params = StdioServerParameters(
         command=sys.executable,
         args=[str(SERVER)],
@@ -20,17 +20,17 @@ async def main() -> None:
     )
     async with Client(params) as client:
         tools = await client.list_tools()
-        print("Инструменты:", [t.name for t in tools.tools])
+        print("Tools:", [t.name for t in tools.tools])
 
-        r = await client.call_tool("add_lead", {"name": "Олена", "phone": "+380000000000",
-                                                "message": "Чи є мигдаль у наявності?"})
+        r = await client.call_tool("add_lead", {"name": "Olena", "phone": "+380000000000",
+                                                "message": "Do you have almonds in stock?"})
         print("add_lead ->", r.structured_content)
 
         r = await client.call_tool("update_status", {"lead_id": 1, "status": "in_progress"})
         print("update_status ->", r.structured_content)
 
         r = await client.call_tool("update_status", {"lead_id": 999, "status": "done"})
-        print("несуществующая заявка ->", r.is_error, r.content[0].text)
+        print("missing lead ->", r.is_error, r.content[0].text)
 
         r = await client.call_tool("list_leads", {})
         print("list_leads ->", r.structured_content)
@@ -39,7 +39,7 @@ async def main() -> None:
         print("crm://stats ->", res.contents[0].text)
 
         prompts = await client.list_prompts()
-        print("Промпты:", [p.name for p in prompts.prompts])
+        print("Prompts:", [p.name for p in prompts.prompts])
 
 
 asyncio.run(main())

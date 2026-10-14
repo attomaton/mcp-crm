@@ -1,43 +1,49 @@
-# mini-crm — MCP-сервер для заявок клиентов
+# mini-crm — MCP server for customer leads
 
-MCP-сервер на Python (официальный SDK `mcp` v2), который даёт AI-агенту (Claude, Codex и др.) доступ к простой CRM в SQLite.
+An MCP server in Python (official `mcp` SDK v2) that gives an AI agent such as Claude Code access to a simple lead CRM stored in SQLite.
 
-| Тип | Имя | Что делает |
+| Type | Name | What it does |
 |---|---|---|
-| Tool | `add_lead` | создать заявку (имя, телефон, сообщение) |
-| Tool | `list_leads` | список заявок, фильтр по статусу |
-| Tool | `update_status` | сменить статус: `new` / `in_progress` / `done` |
-| Resource | `crm://stats` | сколько заявок в каждом статусе |
-| Prompt | `daily_report` | шаблон «разбери новые заявки за день» |
+| Tool | `add_lead` | create a lead (name, phone, message) |
+| Tool | `list_leads` | list leads, optionally filtered by status |
+| Tool | `update_status` | change status: `new` / `in_progress` / `done` |
+| Resource | `crm://stats` | number of leads in each status |
+| Prompt | `daily_report` | template: "review today's new leads" |
 
-## Установка
+## How it works
+
+- Tool parameters and outputs are typed (type hints + a Pydantic model), so the SDK generates JSON schemas the agent can follow.
+- Expected errors are raised as `ToolError`, so the agent sees a readable message (e.g. `Lead with id=999 not found`).
+- All SQL queries are parameterized; status values are restricted with `Literal`.
+
+## Setup
 
 ```bash
 python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+# Windows: .venv\Scripts\python.exe -m pip install -r requirements.txt
+# macOS/Linux: .venv/bin/python -m pip install -r requirements.txt
 ```
 
-## Проверка
+## Test
 
 ```bash
-python test_client.py      # вызывает все инструменты без Claude
-mcp dev server.py          # MCP Inspector в браузере (нужен Node.js)
+python test_client.py      # calls every tool over stdio, no Claude needed
+mcp dev server.py          # MCP Inspector in the browser (requires Node.js)
 ```
 
-## Подключение
+## Connect
 
 **Claude Code**
 ```bash
-claude mcp add --transport stdio mini-crm -- /полный/путь/.venv/bin/python /полный/путь/server.py
+claude mcp add --scope user --transport stdio mini-crm -- /full/path/.venv/bin/python /full/path/server.py
 claude mcp list
 ```
 
 **Codex** — `~/.codex/config.toml`
 ```toml
 [mcp_servers.mini-crm]
-command = "/полный/путь/.venv/bin/python"
-args = ["/полный/путь/server.py"]
+command = "/full/path/.venv/bin/python"
+args = ["/full/path/server.py"]
 ```
 
 **Claude Desktop** — `claude_desktop_config.json`
@@ -45,13 +51,17 @@ args = ["/полный/путь/server.py"]
 {
   "mcpServers": {
     "mini-crm": {
-      "command": "/полный/путь/.venv/bin/python",
-      "args": ["/полный/путь/server.py"]
+      "command": "/full/path/.venv/bin/python",
+      "args": ["/full/path/server.py"]
     }
   }
 }
 ```
 
-На Windows путь к Python: `C:\\...\\.venv\\Scripts\\python.exe`.
+On Windows the Python path is `C:\...\.venv\Scripts\python.exe`.
 
-Путь к базе можно задать переменной окружения `CRM_DB_PATH` (по умолчанию `leads.db` рядом с `server.py`).
+The database path can be set with the `CRM_DB_PATH` environment variable (default: `leads.db` next to `server.py`).
+
+## License
+
+MIT

@@ -1,14 +1,16 @@
-"""Mini-CRM MCP server: заявки клиентов в SQLite.
+"""Mini-CRM MCP server: customer leads stored in SQLite.
 
-Запуск (stdio, так его запускают Claude Code / Claude Desktop / Codex):
+Run over stdio (this is how Claude Code / Claude Desktop / Codex start it):
     python server.py
 
-Проверка в браузере через MCP Inspector:
+Inspect it in the browser with MCP Inspector:
     mcp dev server.py
 """
 
 import os
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -18,14 +20,15 @@ from pydantic import BaseModel
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
-# Путь к базе можно переопределить переменной окружения CRM_DB_PATH
+# The database path can be overridden with the CRM_DB_PATH environment variable
 DB_PATH = Path(os.environ.get("CRM_DB_PATH", Path(__file__).parent / "leads.db"))
 
 Status = Literal["new", "in_progress", "done"]
 
 
 class Lead(BaseModel):
-    """Модель заявки: из неё SDK строит JSON-схему ответа инструмента."""
+    """A customer lead. The SDK builds the tool's output JSON schema from this model."""
+
     id: int
     name: str
     phone: str
@@ -33,34 +36,41 @@ class Lead(BaseModel):
     status: Status
     created_at: str
 
+
 mcp = MCPServer(
     "mini-crm",
-    instructions="CRM с заявками клиентов магазина. Используй инструменты, "
-    "чтобы добавлять заявки, смотреть их и менять статус.",
+    instructions="CRM with customer leads of an online store. Use the tools "
+    "to add leads, list them and change their status.",
 )
 
 
-def db() -> sqlite3.Connection:
+@contextmanager
+def db() -> Iterator[sqlite3.Connection]:
+    """Open a connection, commit on success and always close it."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS leads (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            message TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'new',
-            created_at TEXT NOT NULL
-        )"""
-    )
-    return conn
+    try:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                message TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'new',
+                created_at TEXT NOT NULL
+            )"""
+        )
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
-# ---------- Tools: действия, которые модель может вызвать ----------
+# ---------- Tools: actions the model can call ----------
 
 @mcp.tool()
 def add_lead(name: str, phone: str, message: str) -> Lead:
-    """Создать новую заявку клиента. Возвращает созданную заявку."""
+    """Create a new customer lead. Returns the created lead."""
     with db() as conn:
         cur = conn.execute(
             "INSERT INTO leads (name, phone, message, created_at) VALUES (?, ?, ?, ?)",
@@ -72,7 +82,7 @@ def add_lead(name: str, phone: str, message: str) -> Lead:
 
 @mcp.tool()
 def list_leads(status: Status | None = None, limit: int = 20) -> list[Lead]:
-    """Показать заявки. Можно отфильтровать по статусу: new, in_progress, done."""
+    """List leads, newest first. Optionally filter by status: new, in_progress, done."""
     query, params = "SELECT * FROM leads", []
     if status:
         query += " WHERE status = ?"
@@ -85,38 +95,38 @@ def list_leads(status: Status | None = None, limit: int = 20) -> list[Lead]:
 
 @mcp.tool()
 def update_status(lead_id: int, status: Status) -> Lead:
-    """Изменить статус заявки по её id."""
+    """Change the status of a lead by its id."""
     with db() as conn:
         cur = conn.execute("UPDATE leads SET status = ? WHERE id = ?", (status, lead_id))
         if cur.rowcount == 0:
-            # ToolError = ожидаемая ошибка: её текст увидит модель
-            raise ToolError(f"Заявка с id={lead_id} не найдена")
+            # ToolError is an expected error: the model sees its message
+            raise ToolError(f"Lead with id={lead_id} not found")
         row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
     return Lead(**dict(row))
 
 
-# ---------- Resource: данные, которые клиент может прочитать ----------
+# ---------- Resource: data the client can read ----------
 
 @mcp.resource("crm://stats")
 def stats() -> str:
-    """Сколько заявок в каждом статусе."""
+    """Number of leads in each status."""
     with db() as conn:
         rows = conn.execute("SELECT status, COUNT(*) AS n FROM leads GROUP BY status").fetchall()
-    return "\n".join(f"{r['status']}: {r['n']}" for r in rows) or "Заявок пока нет"
+    return "\n".join(f"{r['status']}: {r['n']}" for r in rows) or "No leads yet"
 
 
-# ---------- Prompt: готовый шаблон запроса ----------
+# ---------- Prompt: a ready-made request template ----------
 
 @mcp.prompt()
 def daily_report() -> str:
-    """Шаблон: отчёт по новым заявкам за день."""
+    """Template: a daily report on new leads."""
     return (
-        "Возьми все заявки со статусом new через list_leads, сгруппируй их по теме "
-        "(цены, доставка, наличие, другое) и предложи, кому ответить первым."
+        "Get all leads with status new via list_leads, group them by topic "
+        "(prices, delivery, availability, other) and suggest who to answer first."
     )
 
 
 if __name__ == "__main__":
-    # ВАЖНО для stdio: ничего не печатай в stdout через print() —
-    # stdout занят протоколом. Логи пиши в stderr.
-    mcp.run()  # по умолчанию transport="stdio"
+    # IMPORTANT for stdio: never print() to stdout,
+    # stdout carries the protocol. Write logs to stderr.
+    mcp.run()  # transport="stdio" by default
